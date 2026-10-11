@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,10 +34,12 @@ class OnionbreadApp:
         self.reader_thread: threading.Thread | None = None
         self.messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self.temp_dir: tempfile.TemporaryDirectory[str] | None = None
-        self.tor_path = tk.StringVar(value=shutil.which("tor") or "")
+        self.tor_path = tk.StringVar(value=self._discover_tor())
         self.transport = tk.StringVar(value=TRANSPORTS[0])
         self.transport_path = tk.StringVar(value="")
         self.status = tk.StringVar(value="Disconnected")
+        self.bootstrap_text = tk.StringVar(value="Not connected")
+        self.bootstrap_progress = tk.IntVar(value=0)
         self._closing = False
 
         self._build_ui()
@@ -93,10 +96,53 @@ class OnionbreadApp:
 
         log_frame = ttk.LabelFrame(outer, text="Tor log", padding=6)
         log_frame.pack(fill="both", expand=True)
+        progress = ttk.Frame(outer)
+        progress.pack(fill="x", pady=(0, 6))
+        ttk.Label(progress, textvariable=self.bootstrap_text).pack(side="left")
+        self.progress_bar = ttk.Progressbar(
+            progress, orient="horizontal", mode="determinate", maximum=100,
+            variable=self.bootstrap_progress, length=180
+        )
+        self.progress_bar.pack(side="right", fill="x", expand=True, padx=(12, 0))
+
         self.log = ScrolledText(log_frame, height=12, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True)
-        self._append_log("Ready. Select your Tor executable, then connect.")
-        self._append_log("Bridge lines do not install pluggable transports; configure those separately if your bridges require them.")
+
+        footer = ttk.Frame(outer)
+        footer.pack(fill="x", pady=(8, 0))
+        ttk.Label(
+            footer, text="SOCKS5 proxy: 127.0.0.1:9050    |    ControlPort: disabled"
+        ).pack(side="left")
+
+        self._append_log("Ready. Tor and Lyrebird are auto-detected when available.")
+        self._append_log("Bridge lines are still entered manually; automatic bridge provisioning is not implemented yet.")
+
+    def _discover_tor(self) -> str:
+        """Prefer a packaged runtime, then a real install over package-manager shims."""
+        app_dir = Path(__file__).resolve().parent
+        candidates = [
+            app_dir / "runtime" / "tor" / "tor.exe",
+            app_dir / "runtime" / "tor.exe",
+            app_dir / "tor.exe",
+        ]
+        scoop_tor = Path.home() / "scoop" / "apps" / "tor"
+        candidates.extend([
+            scoop_tor / "current" / "tor" / "tor.exe",
+            scoop_tor / "current" / "tor.exe",
+        ])
+        if scoop_tor.is_dir():
+            candidates.extend(scoop_tor.glob("*/tor/tor.exe"))
+            candidates.extend(scoop_tor.glob("*/tor.exe"))
+
+        # A PATH lookup can point to Scoop's shim, which may inject its own
+        # configuration flags. Prefer the real Tor binary when available.
+        found = shutil.which("tor") or shutil.which("tor.exe")
+        if found and "scoop" not in str(Path(found).parent).lower():
+            candidates.append(Path(found))
+        valid = [p for p in candidates if p.is_file()]
+        if valid:
+            return str(max(valid, key=lambda p: p.stat().st_mtime))
+        return found or ""
 
     def _browse_tor(self) -> None:
         path = filedialog.askopenfilename(title="Select Tor executable")
@@ -139,6 +185,24 @@ class OnionbreadApp:
         self.connect_button.configure(state="disabled" if connected else "normal")
         self.disconnect_button.configure(state="normal" if connected else "disabled")
 
+    def _resolve_tor_executable(self, selected: str) -> str:
+        """Replace a Scoop shim with the underlying tor.exe when discoverable."""
+        path = Path(selected)
+        if path.is_file() and "scoop" in str(path.parent).lower() and "shims" in str(path.parent).lower():
+            real_candidates = []
+            scoop_tor = Path.home() / "scoop" / "apps" / "tor"
+            real_candidates.extend([
+                scoop_tor / "current" / "tor" / "tor.exe",
+                scoop_tor / "current" / "tor.exe",
+            ])
+            if scoop_tor.is_dir():
+                real_candidates.extend(scoop_tor.glob("*/tor/tor.exe"))
+                real_candidates.extend(scoop_tor.glob("*/tor.exe"))
+            real_candidates = [p for p in real_candidates if p.is_file()]
+            if real_candidates:
+                return str(max(real_candidates, key=lambda p: p.stat().st_mtime))
+        return selected
+
     def _find_transport_helper(self) -> str:
         selected = self.transport_path.get().strip()
         if selected:
@@ -159,8 +223,12 @@ class OnionbreadApp:
             if found:
                 return found
 
-        tor = Path(self.tor_path.get().strip())
-        roots = [tor.parent, tor.parent / "pluggable_transports"]
+        tor = Path(self._resolve_tor_executable(self.tor_path.get().strip()))
+        roots = [
+            tor.parent / "pluggable_transports",
+            tor.parent,
+            tor.parent.parent / "pluggable_transports",
+        ]
         for root in roots:
             for name in names:
                 candidate = root / name
@@ -223,9 +291,13 @@ class OnionbreadApp:
         if not binary:
             messagebox.showerror("Tor not found", "Choose the Tor executable or install Tor and make sure 'tor' is on PATH.")
             return
+        binary = self._resolve_tor_executable(binary)
         if not Path(binary).is_file() and shutil.which(binary) is None:
             messagebox.showerror("Tor not found", f"Cannot find executable: {binary}")
             return
+        self.tor_path.set(binary)
+        self.bootstrap_progress.set(0)
+        self.bootstrap_text.set("Starting Tor…")
         try:
             torrc = self._make_torrc()
         except ValueError as exc:
@@ -264,10 +336,26 @@ class OnionbreadApp:
                 kind, value = self.messages.get_nowait()
                 if kind == "log":
                     self._append_log(value)
+                    match = re.search(r"Bootstrapped (\\d+)% \\(([^)]+)\\):? ?(.*)", value)
+                    if match:
+                        percent = int(match.group(1))
+                        stage = match.group(3).strip() or match.group(2).replace("_", " ")
+                        self.bootstrap_progress.set(percent)
+                        if percent >= 100:
+                            self.bootstrap_text.set("Connected — Tor circuit ready")
+                            self.status.set("Connected")
+                        else:
+                            self.bootstrap_text.set(f"Connecting — {percent}% · {stage}")
+                    elif "Bootstrapped " not in value and (
+                        "Failed to start process" in value or "failed at launch" in value.lower()
+                    ):
+                        self.bootstrap_text.set("Transport failed to start")
                 elif kind == "exit":
                     self._append_log(f"Tor exited with code {value}.")
                     self.process = None
                     self._set_connected(False)
+                    self.bootstrap_text.set("Disconnected")
+                    self.bootstrap_progress.set(0)
                     self._cleanup_temp()
         except queue.Empty:
             pass
@@ -279,6 +367,7 @@ class OnionbreadApp:
         if not process:
             return
         self._append_log("Stopping Tor…")
+        self.bootstrap_text.set("Disconnecting…")
         try:
             process.terminate()
             try:
@@ -289,6 +378,8 @@ class OnionbreadApp:
             self._append_log(f"Could not stop Tor cleanly: {exc}")
         self.process = None
         self._set_connected(False)
+        self.bootstrap_text.set("Disconnected")
+        self.bootstrap_progress.set(0)
         self._cleanup_temp()
 
     def _cleanup_temp(self) -> None:
