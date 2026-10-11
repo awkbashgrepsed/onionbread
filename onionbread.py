@@ -474,11 +474,14 @@ class OnionbreadApp:
         lines = [
             f'DataDirectory {str(data_dir)}',
             f"SocksPort {('0.0.0.0' if self.share_to_lan.get() else '127.0.0.1')}:{self._validate_ports()[0]}",
+            # Always permit local clients: the VPN DNS forwarder connects to
+            # Tor's SOCKS listener from 127.0.0.1, even when LAN sharing is on.
+            "SocksPolicy accept 127.0.0.1",
             *([
                 "SocksPolicy accept 10.0.0.0/8",
                 "SocksPolicy accept 172.16.0.0/12",
                 "SocksPolicy accept 192.168.0.0/16",
-            ] if self.share_to_lan.get() else ["SocksPolicy accept 127.0.0.1"]),
+            ] if self.share_to_lan.get() else []),
             "SocksPolicy reject *",
             "Log notice stdout",
             "SafeLogging 1",
