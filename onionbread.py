@@ -46,6 +46,10 @@ class OnionbreadApp:
         self.transport = tk.StringVar(value=saved_transport)
         self.transport_path = tk.StringVar(value=saved_settings.get("transport_path", ""))
         self._saved_bridge_lines = saved_settings.get("bridge_lines", "")
+        self.share_to_lan = tk.BooleanVar(value=saved_settings.get("share_to_lan", "false").lower() == "true")
+        self.socks_port = tk.StringVar(value=saved_settings.get("socks_port", "9050"))
+        self.control_port_enabled = tk.BooleanVar(value=saved_settings.get("control_port_enabled", "false").lower() == "true")
+        self.control_port = tk.StringVar(value=saved_settings.get("control_port", "9051"))
         self._auto_transport_path = ""
         self.status = tk.StringVar(value="Disconnected")
         self.bootstrap_text = tk.StringVar(value="Not connected")
@@ -108,6 +112,7 @@ class OnionbreadApp:
             controls, text="Disconnect", command=self.disconnect, state="disabled"
         )
         self.disconnect_button.pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="Settings…", command=self._open_settings).pack(side="left", padx=(8, 0))
         ttk.Button(controls, text="Clear log", command=self._clear_log).pack(side="right")
 
         # Pack the progress and port rows before the expandable log. If the
@@ -124,10 +129,9 @@ class OnionbreadApp:
 
         footer = ttk.Frame(outer)
         footer.pack(fill="x", pady=(8, 0))
-        ttk.Label(
-            footer,
-            text="SOCKS5 proxy port: 9050 (127.0.0.1)    |    ControlPort: disabled",
-        ).pack(side="left")
+        self.port_summary = tk.StringVar()
+        ttk.Label(footer, textvariable=self.port_summary).pack(side="left")
+        self._update_port_summary()
 
         log_frame = ttk.LabelFrame(outer, text="Tor log", padding=6)
         log_frame.pack(fill="both", expand=True)
@@ -155,7 +159,7 @@ class OnionbreadApp:
         if not isinstance(data, dict):
             return {}
         settings: dict[str, str] = {}
-        for key in ("tor_path", "transport", "transport_path", "bridge_lines"):
+        for key in ("tor_path", "transport", "transport_path", "bridge_lines", "share_to_lan", "socks_port", "control_port_enabled", "control_port"):
             value = data.get(key)
             if isinstance(value, str):
                 settings[key] = value
@@ -168,6 +172,10 @@ class OnionbreadApp:
             "transport": self.transport.get(),
             "transport_path": self.transport_path.get().strip(),
             "bridge_lines": self.bridge_entry.get("1.0", "end-1c"),
+            "share_to_lan": str(self.share_to_lan.get()).lower(),
+            "socks_port": self.socks_port.get().strip(),
+            "control_port_enabled": str(self.control_port_enabled.get()).lower(),
+            "control_port": self.control_port.get().strip(),
         }
         try:
             self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +185,74 @@ class OnionbreadApp:
             )
         except OSError as exc:
             self._append_log(f"Could not save settings to {self.settings_path}: {exc}")
+
+    def _update_port_summary(self) -> None:
+        host = "LAN (0.0.0.0)" if self.share_to_lan.get() else "127.0.0.1"
+        control = f"127.0.0.1:{self.control_port.get().strip()}" if self.control_port_enabled.get() else "disabled"
+        self.port_summary.set(f"SOCKS5: {host}:{self.socks_port.get().strip()}    |    ControlPort: {control}")
+
+    def _validate_ports(self) -> tuple[int, int]:
+        try:
+            socks_port = int(self.socks_port.get().strip())
+            control_port = int(self.control_port.get().strip())
+        except ValueError as exc:
+            raise ValueError("Ports must be whole numbers between 1 and 65535.") from exc
+        if not 1 <= socks_port <= 65535 or not 1 <= control_port <= 65535:
+            raise ValueError("Ports must be between 1 and 65535.")
+        if self.control_port_enabled.get() and socks_port == control_port:
+            raise ValueError("SOCKS5 and ControlPort must use different port numbers.")
+        return socks_port, control_port
+
+    def _open_settings(self) -> None:
+        window = tk.Toplevel(self.root)
+        window.title("Onionbread Settings")
+        window.transient(self.root)
+        window.resizable(False, False)
+        body = ttk.Frame(window, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Network", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        ttk.Checkbutton(body, text="Share SOCKS5 proxy with devices on my LAN", variable=self.share_to_lan).grid(
+            row=1, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(
+            body,
+            text="LAN sharing binds to all IPv4 interfaces and accepts private-network clients. Your firewall may also need to allow the selected port.",
+            wraplength=390,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=(22, 0), pady=(2, 10))
+        ttk.Label(body, text="SOCKS5 port").grid(row=3, column=0, sticky="w")
+        ttk.Entry(body, textvariable=self.socks_port, width=10).grid(row=3, column=1, sticky="e", pady=3)
+        ttk.Separator(body).grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Checkbutton(body, text="Enable local ControlPort (advanced)", variable=self.control_port_enabled).grid(
+            row=5, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(body, text="ControlPort").grid(row=6, column=0, sticky="w")
+        ttk.Entry(body, textvariable=self.control_port, width=10).grid(row=6, column=1, sticky="e", pady=3)
+        ttk.Label(
+            body,
+            text="ControlPort stays on 127.0.0.1 and uses cookie authentication; it is never shared to the LAN.",
+            wraplength=390,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=(22, 0), pady=(2, 10))
+        ttk.Label(body, text="Port and sharing changes apply the next time you connect.").grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=(0, 12)
+        )
+        actions = ttk.Frame(body)
+        actions.grid(row=9, column=0, columnspan=2, sticky="e")
+        def save() -> None:
+            try:
+                self._validate_ports()
+            except ValueError as exc:
+                messagebox.showwarning("Invalid port settings", str(exc), parent=window)
+                return
+            self._save_settings()
+            self._update_port_summary()
+            window.destroy()
+        ttk.Button(actions, text="Cancel", command=window.destroy).pack(side="right")
+        ttk.Button(actions, text="Save", command=save).pack(side="right", padx=(0, 8))
+        window.bind("<Escape>", lambda _event: window.destroy())
+        window.grab_set()
+        window.focus_set()
 
     def _discover_tor(self) -> str:
         """Prefer a packaged runtime, then a real install over package-manager shims."""
@@ -361,13 +437,20 @@ class OnionbreadApp:
         data_dir.mkdir()
         lines = [
             f'DataDirectory {str(data_dir)}',
-            "SocksPort 127.0.0.1:9050",
-            "SocksPolicy accept 127.0.0.1",
+            f"SocksPort {('0.0.0.0' if self.share_to_lan.get() else '127.0.0.1')}:{self._validate_ports()[0]}",
+            *([
+                "SocksPolicy accept 10.0.0.0/8",
+                "SocksPolicy accept 172.16.0.0/12",
+                "SocksPolicy accept 192.168.0.0/16",
+            ] if self.share_to_lan.get() else ["SocksPolicy accept 127.0.0.1"]),
             "SocksPolicy reject *",
             "Log notice stdout",
             "SafeLogging 1",
             "AvoidDiskWrites 1",
         ]
+        if self.control_port_enabled.get():
+            _socks_port, control_port = self._validate_ports()
+            lines.extend([f"ControlPort 127.0.0.1:{control_port}", "CookieAuthentication 1"])
         mode = self.transport.get()
         if mode != TRANSPORTS[0]:
             bridges = [line.strip() for line in self.bridge_entry.get("1.0", "end").splitlines() if line.strip()]
