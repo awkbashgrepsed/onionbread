@@ -6,6 +6,7 @@ This app does not bundle Tor or guarantee that a selected transport is available
 """
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
@@ -34,9 +35,17 @@ class OnionbreadApp:
         self.reader_thread: threading.Thread | None = None
         self.messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self.temp_dir: tempfile.TemporaryDirectory[str] | None = None
-        self.tor_path = tk.StringVar(value=self._discover_tor())
-        self.transport = tk.StringVar(value=TRANSPORTS[0])
-        self.transport_path = tk.StringVar(value="")
+        self.settings_path = self._settings_file()
+        saved_settings = self._load_settings()
+        self.tor_path = tk.StringVar(
+            value=saved_settings.get("tor_path") or self._discover_tor()
+        )
+        saved_transport = saved_settings.get("transport", TRANSPORTS[0])
+        if saved_transport not in TRANSPORTS:
+            saved_transport = TRANSPORTS[0]
+        self.transport = tk.StringVar(value=saved_transport)
+        self.transport_path = tk.StringVar(value=saved_settings.get("transport_path", ""))
+        self._saved_bridge_lines = saved_settings.get("bridge_lines", "")
         self._auto_transport_path = ""
         self.status = tk.StringVar(value="Disconnected")
         self.bootstrap_text = tk.StringVar(value="Not connected")
@@ -80,6 +89,8 @@ class OnionbreadApp:
         ttk.Label(bridge, text="Bridge line(s)").grid(row=2, column=0, sticky="nw", pady=(8, 0))
         self.bridge_entry = ScrolledText(bridge, height=3, wrap="word")
         self.bridge_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
+        if self._saved_bridge_lines:
+            self.bridge_entry.insert("1.0", self._saved_bridge_lines)
         self.bridge_hint = ttk.Label(
             bridge, text="Paste bridge lines supplied by Tor Project, one per line.",
             wraplength=450
@@ -125,8 +136,49 @@ class OnionbreadApp:
         self._append_log("Ready. Tor and Lyrebird are auto-detected when available.")
         self._append_log("Bridge lines are still entered manually; automatic bridge provisioning is not implemented yet.")
 
+    def _settings_file(self) -> Path:
+        """Return a per-user settings path, outside the application/runtime directory."""
+        if os.name == "nt":
+            base = Path(os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming"))
+        else:
+            base = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+        return base / "Onionbread" / "settings.json"
+
+    def _load_settings(self) -> dict[str, str]:
+        """Load saved UI configuration; ignore missing or malformed settings."""
+        try:
+            data = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        settings: dict[str, str] = {}
+        for key in ("tor_path", "transport", "transport_path", "bridge_lines"):
+            value = data.get(key)
+            if isinstance(value, str):
+                settings[key] = value
+        return settings
+
+    def _save_settings(self) -> None:
+        """Persist selected Tor/transport paths and bridge lines for the next launch."""
+        settings = {
+            "tor_path": self.tor_path.get().strip(),
+            "transport": self.transport.get(),
+            "transport_path": self.transport_path.get().strip(),
+            "bridge_lines": self.bridge_entry.get("1.0", "end-1c"),
+        }
+        try:
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            self.settings_path.write_text(
+                json.dumps(settings, indent=2, ensure_ascii=False) + "\\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self._append_log(f"Could not save settings to {self.settings_path}: {exc}")
+
     def _discover_tor(self) -> str:
         """Prefer a packaged runtime, then a real install over package-manager shims."""
+
         app_dir = Path(__file__).resolve().parent
         candidates = [
             app_dir / "runtime" / "tor" / "tor.exe",
@@ -338,6 +390,7 @@ class OnionbreadApp:
     def connect(self) -> None:
         if self.process and self.process.poll() is None:
             return
+        self._save_settings()
         binary = self.tor_path.get().strip()
         if not binary:
             messagebox.showerror("Tor not found", "Choose the Tor executable or install Tor and make sure 'tor' is on PATH.")
@@ -439,6 +492,7 @@ class OnionbreadApp:
             self.temp_dir = None
 
     def _on_close(self) -> None:
+        self._save_settings()
         self._closing = True
         if self.process and self.process.poll() is None:
             self.disconnect()
