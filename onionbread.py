@@ -37,6 +37,7 @@ class OnionbreadApp:
         self.tor_path = tk.StringVar(value=self._discover_tor())
         self.transport = tk.StringVar(value=TRANSPORTS[0])
         self.transport_path = tk.StringVar(value="")
+        self._auto_transport_path = ""
         self.status = tk.StringVar(value="Disconnected")
         self.bootstrap_text = tk.StringVar(value="Not connected")
         self.bootstrap_progress = tk.IntVar(value=0)
@@ -44,6 +45,8 @@ class OnionbreadApp:
 
         self._build_ui()
         self._update_bridge_controls()
+        self._refresh_transport_helper()
+        self.tor_path.trace_add("write", self._on_tor_path_changed)
         self.root.after(100, self._drain_messages)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -68,7 +71,7 @@ class OnionbreadApp:
             bridge, textvariable=self.transport, values=TRANSPORTS, state="readonly"
         )
         self.transport_box.grid(row=0, column=1, sticky="ew", padx=(8, 0))
-        self.transport_box.bind("<<ComboboxSelected>>", lambda _event: self._update_bridge_controls())
+        self.transport_box.bind("<<ComboboxSelected>>", lambda _event: self._on_transport_changed())
         ttk.Label(bridge, text="Transport helper").grid(row=1, column=0, sticky="w", pady=(8, 0))
         self.transport_entry = ttk.Entry(bridge, textvariable=self.transport_path)
         self.transport_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
@@ -203,6 +206,67 @@ class OnionbreadApp:
                 return str(max(real_candidates, key=lambda p: p.stat().st_mtime))
         return selected
 
+    def _transport_helper_names(self) -> tuple[str, ...]:
+        return {
+            "obfs4": ("lyrebird", "lyrebird.exe", "obfs4proxy", "obfs4proxy.exe"),
+            "Snowflake": ("lyrebird", "lyrebird.exe", "snowflake-client", "snowflake-client.exe"),
+            "WebTunnel": ("lyrebird", "lyrebird.exe"),
+        }.get(self.transport.get(), ())
+
+    def _discover_transport_helper(self) -> str:
+        """Find a helper on PATH or alongside the selected Tor installation."""
+        names = self._transport_helper_names()
+        for name in names:
+            found = shutil.which(name)
+            if found:
+                return found
+
+        selected_tor = self.tor_path.get().strip()
+        if not selected_tor:
+            return ""
+        tor = Path(self._resolve_tor_executable(selected_tor))
+        roots = [
+            tor.parent / "pluggable_transports",
+            tor.parent,
+            tor.parent.parent / "pluggable_transports",
+        ]
+        # Also check the bundled runtime even if the Tor executable was
+        # manually selected from elsewhere.
+        app_dir = Path(__file__).resolve().parent
+        roots.extend([
+            app_dir / "runtime" / "tor" / "pluggable_transports",
+            app_dir / "runtime" / "pluggable_transports",
+        ])
+        seen: set[str] = set()
+        for root in roots:
+            key = str(root).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            for name in names:
+                candidate = root / name
+                if candidate.is_file():
+                    return str(candidate)
+        return ""
+
+    def _refresh_transport_helper(self) -> None:
+        """Populate the helper field when a matching executable is discovered."""
+        current = self.transport_path.get().strip()
+        # Preserve a path the user explicitly entered; replace only a blank
+        # field or the previous automatically detected value.
+        if current and current != self._auto_transport_path:
+            return
+        detected = self._discover_transport_helper()
+        self._auto_transport_path = detected
+        self.transport_path.set(detected)
+
+    def _on_transport_changed(self) -> None:
+        self._update_bridge_controls()
+        self._refresh_transport_helper()
+
+    def _on_tor_path_changed(self, *_args: object) -> None:
+        self._refresh_transport_helper()
+
     def _find_transport_helper(self) -> str:
         selected = self.transport_path.get().strip()
         if selected:
@@ -213,27 +277,9 @@ class OnionbreadApp:
                 return found
             raise ValueError(f"Cannot find transport helper: {selected}")
 
-        names = {
-            "obfs4": ("lyrebird", "lyrebird.exe", "obfs4proxy", "obfs4proxy.exe"),
-            "Snowflake": ("lyrebird", "lyrebird.exe", "snowflake-client", "snowflake-client.exe"),
-            "WebTunnel": ("lyrebird", "lyrebird.exe"),
-        }.get(self.transport.get(), ())
-        for name in names:
-            found = shutil.which(name)
-            if found:
-                return found
-
-        tor = Path(self._resolve_tor_executable(self.tor_path.get().strip()))
-        roots = [
-            tor.parent / "pluggable_transports",
-            tor.parent,
-            tor.parent.parent / "pluggable_transports",
-        ]
-        for root in roots:
-            for name in names:
-                candidate = root / name
-                if candidate.is_file():
-                    return str(candidate)
+        found = self._discover_transport_helper()
+        if found:
+            return found
         raise ValueError(
             "Transport helper not found. Select lyrebird (from the Tor Expert Bundle) "
             "or the matching transport executable."
