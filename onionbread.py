@@ -336,7 +336,7 @@ class OnionbreadApp:
                 kind, value = self.messages.get_nowait()
                 if kind == "log":
                     self._append_log(value)
-                    match = re.search(r"Bootstrapped (\\d+)% \\(([^)]+)\\):? ?(.*)", value)
+                    match = re.search(r"Bootstrapped (\d+)% \(([^)]+)\):? ?(.*)", value)
                     if match:
                         percent = int(match.group(1))
                         stage = match.group(3).strip() or match.group(2).replace("_", " ")
