@@ -88,7 +88,9 @@ class OnionbreadApp:
         self.transport_browse.grid(row=1, column=2, padx=(6, 0), pady=(8, 0))
         ttk.Label(bridge, text="Bridge line(s)").grid(row=2, column=0, sticky="nw", pady=(8, 0))
         self.bridge_entry = ScrolledText(bridge, height=3, wrap="word")
-        self.bridge_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
+        self.bridge_entry.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        self.bridge_paste = ttk.Button(bridge, text="Paste", command=self._paste_bridges)
+        self.bridge_paste.grid(row=2, column=2, sticky="n", padx=(6, 0), pady=(8, 0))
         if self._saved_bridge_lines:
             self.bridge_entry.insert("1.0", self._saved_bridge_lines)
         self.bridge_hint = ttk.Label(
@@ -214,10 +216,21 @@ class OnionbreadApp:
         if path:
             self.transport_path.set(path)
 
+    def _paste_bridges(self) -> None:
+        """Insert clipboard text at the current cursor in the bridge field."""
+        try:
+            clipboard_text = self.root.clipboard_get()
+        except tk.TclError:
+            messagebox.showwarning("Clipboard unavailable", "No text is available on the clipboard.", parent=self.root)
+            return
+        self.bridge_entry.focus_set()
+        self.bridge_entry.insert("insert", clipboard_text)
+
     def _update_bridge_controls(self) -> None:
         direct = self.transport.get() == TRANSPORTS[0]
         state = "disabled" if direct else "normal"
         self.bridge_entry.configure(state=state)
+        self.bridge_paste.configure(state=state)
         self.transport_entry.configure(state=state)
         self.transport_browse.configure(state=state)
         if direct:
