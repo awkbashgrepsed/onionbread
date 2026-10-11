@@ -21,6 +21,41 @@ DEFAULT_VERSION = "15.0.24"
 BASE_URL = "https://dist.torproject.org/torbrowser"
 
 
+def download_with_progress(url: str, destination: Path) -> None:
+    """Download a file while displaying a terminal progress bar."""
+    request = urllib.request.Request(url, headers={"User-Agent": "Onionbread-runtime-fetcher"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        total = int(response.headers.get("Content-Length", "0") or 0)
+        downloaded = 0
+        bar_width = 32
+        with destination.open("wb") as output:
+            while True:
+                chunk = response.read(1024 * 128)
+                if not chunk:
+                    break
+                output.write(chunk)
+                downloaded += len(chunk)
+                if total > 0:
+                    fraction = min(downloaded / total, 1.0)
+                    filled = int(bar_width * fraction)
+                    bar = "#" * filled + "-" * (bar_width - filled)
+                    percent = int(fraction * 100)
+                    print(
+                        f"\\rDownloading [{bar}] {percent:3d}% "
+                        f"({downloaded / (1024 * 1024):.1f}/"
+                        f"{total / (1024 * 1024):.1f} MiB)",
+                        end="",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"\\rDownloading... {downloaded / (1024 * 1024):.1f} MiB",
+                        end="",
+                        flush=True,
+                    )
+    print("\\nDownload complete.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default=DEFAULT_VERSION, help="Tor Browser bundle version (default: %(default)s)")
@@ -37,10 +72,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="onionbread-runtime-") as temp_name:
         temp = Path(temp_name)
         archive = temp / filename
-        request = urllib.request.Request(url, headers={"User-Agent": "Onionbread-runtime-fetcher"})
-        with urllib.request.urlopen(request, timeout=60) as response, archive.open("wb") as output:
-            shutil.copyfileobj(response, output)
+        download_with_progress(url, archive)
 
+        print("Extracting Tor Expert Bundle...")
         unpacked = temp / "unpacked"
         unpacked.mkdir()
         with tarfile.open(archive, "r:gz") as bundle:
