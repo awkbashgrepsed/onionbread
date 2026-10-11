@@ -176,7 +176,7 @@ class OnionbreadApp:
         data_dir = Path(self.temp_dir.name) / "data"
         data_dir.mkdir()
         lines = [
-            f'DataDirectory "{data_dir.as_posix()}"',
+            f'DataDirectory {str(data_dir)}',
             "SocksPort 127.0.0.1:9050",
             "SocksPolicy accept 127.0.0.1",
             "SocksPolicy reject *",
@@ -200,7 +200,15 @@ class OnionbreadApp:
                 normalized.append(bridge)
 
             helper = self._find_transport_helper()
-            helper_arg = '"' + helper.replace('"', '\\"') + '"'
+            # Tor's managed-proxy parser treats quotes after `exec` as part
+            # of the executable name on Windows. Keep the path unquoted; the
+            # normal Tor Expert Bundle path contains no spaces.
+            helper_arg = helper.replace("\\", "/")
+            if any(ch.isspace() for ch in helper_arg):
+                raise ValueError(
+                    "The transport helper path contains spaces. Move lyrebird.exe "
+                    "to a path without spaces, then select it again."
+                )
             lines.extend([
                 "UseBridges 1",
                 f"ClientTransportPlugin {mode.lower()} exec {helper_arg}",
