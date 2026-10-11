@@ -170,7 +170,7 @@ class OnionbreadApp:
         try:
             self.settings_path.parent.mkdir(parents=True, exist_ok=True)
             self.settings_path.write_text(
-                json.dumps(settings, indent=2, ensure_ascii=False) + "\\n",
+                json.dumps(settings, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
         except OSError as exc:
