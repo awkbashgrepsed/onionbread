@@ -19,7 +19,7 @@ from tkinter.scrolledtext import ScrolledText
 
 
 APP_NAME = "Onionbread"
-TRANSPORTS = ("None (direct Tor)", "obfs4", "snowflake", "meek-azure", "Custom bridge")
+TRANSPORTS = ("No bridges (direct Tor)", "Custom bridge lines")
 
 
 class OnionbreadApp:
@@ -70,7 +70,7 @@ class OnionbreadApp:
         self.bridge_entry = ttk.Entry(bridge, textvariable=self.bridge_text)
         self.bridge_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
         self.bridge_hint = ttk.Label(
-            bridge, text="Paste bridge lines supplied by Tor Project; separate multiple lines with semicolons.",
+            bridge, text="Paste bridge lines supplied by Tor Project, one per line.",
             wraplength=450
         )
         self.bridge_hint.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
@@ -91,7 +91,7 @@ class OnionbreadApp:
         self.log = ScrolledText(log_frame, height=12, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=True)
         self._append_log("Ready. Select your Tor executable, then connect.")
-        self._append_log("Note: a bridge transport must be installed and configured for your Tor distribution.")
+        self._append_log("Bridge lines do not install pluggable transports; configure those separately if your bridges require them.")
 
     def _browse_tor(self) -> None:
         path = filedialog.askopenfilename(title="Select Tor executable")
@@ -99,13 +99,13 @@ class OnionbreadApp:
             self.tor_path.set(path)
 
     def _update_bridge_controls(self) -> None:
-        custom = self.transport.get() == "Custom bridge"
+        custom = self.transport.get() == "Custom bridge lines"
         state = "normal" if custom else "disabled"
         self.bridge_entry.configure(state=state)
-        if self.transport.get() == "None (direct Tor)":
+        if self.transport.get() == "No bridges (direct Tor)":
             self.bridge_hint.configure(text="Connect without bridges. Your network must allow direct Tor connections.")
         elif custom:
-            self.bridge_hint.configure(text="Paste complete bridge lines from an official or trusted source. Use one line per bridge.")
+            self.bridge_hint.configure(text="Paste complete bridge lines from an official or trusted source, one per line. Pluggable transports must be installed separately.")
         else:
             self.bridge_hint.configure(text=(
                 "This selects the bridge transport type; it does not download bridges or install a transport. "
@@ -142,10 +142,10 @@ class OnionbreadApp:
             "AvoidDiskWrites 1",
         ]
         mode = self.transport.get()
-        if mode != "None (direct Tor)":
+        if mode != "No bridges (direct Tor)":
             lines.append("UseBridges 1")
-            if mode == "Custom bridge":
-                bridges = [line.strip() for line in self.bridge_text.get().splitlines() if line.strip()]
+            if mode == "Custom bridge lines":
+                bridges = [line.strip() for line in self.bridge_entry.get("1.0", "end").splitlines() if line.strip()]
                 if not bridges:
                     raise ValueError("Enter at least one bridge line.")
                 for line in bridges:
@@ -157,7 +157,7 @@ class OnionbreadApp:
                 # setting helps Tor use bridges of the selected transport when
                 # suitable Bridge lines are also supplied in the torrc.
                 raise ValueError(
-                    "A transport type alone is not enough to connect. Choose Custom bridge and paste "
+                    "A transport type alone is not enough to connect. choose Custom bridge lines and paste "
                     "bridge lines, or add transport-specific setup for your installed Tor package."
                 )
         return "\n".join(lines) + "\n"
