@@ -24,6 +24,9 @@ jobs:
       - name: Stage official Tor Expert Bundle
         run: python tools/fetch_tor_runtime.py
 
+      - name: Stage Windows VPN runtime
+        run: python tools/fetch_vpn_runtime.py
+
       - name: Install packager
         run: python -m pip install --upgrade pyinstaller
 
