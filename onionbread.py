@@ -27,8 +27,8 @@ class OnionbreadApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_NAME + " — Tor control")
-        self.root.geometry("650x500")
-        self.root.minsize(540, 420)
+        self.root.geometry("650x600")
+        self.root.minsize(540, 520)
 
         self.process: subprocess.Popen[str] | None = None
         self.reader_thread: threading.Thread | None = None
