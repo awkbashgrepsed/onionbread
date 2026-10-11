@@ -139,6 +139,38 @@ class OnionbreadApp:
         self.connect_button.configure(state="disabled" if connected else "normal")
         self.disconnect_button.configure(state="normal" if connected else "disabled")
 
+    def _find_transport_helper(self) -> str:
+        selected = self.transport_path.get().strip()
+        if selected:
+            if Path(selected).is_file():
+                return selected
+            found = shutil.which(selected)
+            if found:
+                return found
+            raise ValueError(f"Cannot find transport helper: {selected}")
+
+        names = {
+            "obfs4": ("lyrebird", "lyrebird.exe", "obfs4proxy", "obfs4proxy.exe"),
+            "Snowflake": ("lyrebird", "lyrebird.exe", "snowflake-client", "snowflake-client.exe"),
+            "WebTunnel": ("lyrebird", "lyrebird.exe"),
+        }.get(self.transport.get(), ())
+        for name in names:
+            found = shutil.which(name)
+            if found:
+                return found
+
+        tor = Path(self.tor_path.get().strip())
+        roots = [tor.parent, tor.parent / "pluggable_transports"]
+        for root in roots:
+            for name in names:
+                candidate = root / name
+                if candidate.is_file():
+                    return str(candidate)
+        raise ValueError(
+            "Transport helper not found. Select lyrebird (from the Tor Expert Bundle) "
+            "or the matching transport executable."
+        )
+
     def _make_torrc(self) -> str:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="onionbread-")
         data_dir = Path(self.temp_dir.name) / "data"
@@ -153,24 +185,27 @@ class OnionbreadApp:
             "AvoidDiskWrites 1",
         ]
         mode = self.transport.get()
-        if mode != "No bridges (direct Tor)":
-            lines.append("UseBridges 1")
-            if mode == "Custom bridge lines":
-                bridges = [line.strip() for line in self.bridge_entry.get("1.0", "end").splitlines() if line.strip()]
-                if not bridges:
-                    raise ValueError("Enter at least one bridge line.")
-                for line in bridges:
-                    if not line.lower().startswith("bridge "):
-                        line = "Bridge " + line
-                    lines.append(line)
-            else:
-                # Tor's bridge type is not itself a complete bridge address. This
-                # setting helps Tor use bridges of the selected transport when
-                # suitable Bridge lines are also supplied in the torrc.
-                raise ValueError(
-                    "A transport type alone is not enough to connect. choose Custom bridge lines and paste "
-                    "bridge lines, or add transport-specific setup for your installed Tor package."
-                )
+        if mode != TRANSPORTS[0]:
+            bridges = [line.strip() for line in self.bridge_entry.get("1.0", "end").splitlines() if line.strip()]
+            if not bridges:
+                raise ValueError(f"Paste at least one {mode} bridge line.")
+
+            normalized = []
+            for bridge in bridges:
+                if not bridge.lower().startswith("bridge "):
+                    bridge = "Bridge " + bridge
+                parts = bridge.split()
+                if len(parts) < 2 or parts[0].lower() != "bridge" or parts[1].lower() != mode.lower():
+                    raise ValueError(f"Bridge line does not match selected transport ({mode}): {bridge}")
+                normalized.append(bridge)
+
+            helper = self._find_transport_helper()
+            helper_arg = '"' + helper.replace('"', '\\"') + '"'
+            lines.extend([
+                "UseBridges 1",
+                f"ClientTransportPlugin {mode.lower()} exec {helper_arg}",
+            ])
+            lines.extend(normalized)
         return "\n".join(lines) + "\n"
 
     def connect(self) -> None:
