@@ -97,8 +97,9 @@ class OnionbreadApp:
         self.disconnect_button.pack(side="left", padx=(8, 0))
         ttk.Button(controls, text="Clear log", command=self._clear_log).pack(side="right")
 
-        log_frame = ttk.LabelFrame(outer, text="Tor log", padding=6)
-        log_frame.pack(fill="both", expand=True)
+        # Pack the progress and port rows before the expandable log. If the
+        # expanding log is packed first, Tk can squeeze the footer out of view
+        # in smaller windows.
         progress = ttk.Frame(outer)
         progress.pack(fill="x", pady=(0, 6))
         ttk.Label(progress, textvariable=self.bootstrap_text).pack(side="left")
@@ -108,14 +109,18 @@ class OnionbreadApp:
         )
         self.progress_bar.pack(side="right", fill="x", expand=True, padx=(12, 0))
 
-        self.log = ScrolledText(log_frame, height=12, wrap="word", state="disabled")
-        self.log.pack(fill="both", expand=True)
-
         footer = ttk.Frame(outer)
         footer.pack(fill="x", pady=(8, 0))
         ttk.Label(
-            footer, text="SOCKS5 proxy: 127.0.0.1:9050    |    ControlPort: disabled"
+            footer,
+            text="SOCKS5 proxy port: 9050 (127.0.0.1)    |    ControlPort: disabled",
         ).pack(side="left")
+
+        log_frame = ttk.LabelFrame(outer, text="Tor log", padding=6)
+        log_frame.pack(fill="both", expand=True)
+
+        self.log = ScrolledText(log_frame, height=12, wrap="word", state="disabled")
+        self.log.pack(fill="both", expand=True)
 
         self._append_log("Ready. Tor and Lyrebird are auto-detected when available.")
         self._append_log("Bridge lines are still entered manually; automatic bridge provisioning is not implemented yet.")
