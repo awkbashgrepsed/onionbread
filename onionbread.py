@@ -35,6 +35,7 @@ class OnionbreadApp:
         self.temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self.tor_path = tk.StringVar(value=shutil.which("tor") or "")
         self.transport = tk.StringVar(value=TRANSPORTS[0])
+        self.transport_path = tk.StringVar(value="")
         self.status = tk.StringVar(value="Disconnected")
         self._closing = False
 
@@ -65,14 +66,19 @@ class OnionbreadApp:
         )
         self.transport_box.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         self.transport_box.bind("<<ComboboxSelected>>", lambda _event: self._update_bridge_controls())
-        ttk.Label(bridge, text="Bridge line(s)").grid(row=1, column=0, sticky="nw", pady=(8, 0))
+        ttk.Label(bridge, text="Transport helper").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        self.transport_entry = ttk.Entry(bridge, textvariable=self.transport_path)
+        self.transport_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        self.transport_browse = ttk.Button(bridge, text="Browse…", command=self._browse_transport)
+        self.transport_browse.grid(row=1, column=2, padx=(6, 0), pady=(8, 0))
+        ttk.Label(bridge, text="Bridge line(s)").grid(row=2, column=0, sticky="nw", pady=(8, 0))
         self.bridge_entry = ScrolledText(bridge, height=3, wrap="word")
-        self.bridge_entry.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        self.bridge_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(8, 0))
         self.bridge_hint = ttk.Label(
             bridge, text="Paste bridge lines supplied by Tor Project, one per line.",
             wraplength=450
         )
-        self.bridge_hint.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        self.bridge_hint.grid(row=3, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(4, 0))
         bridge.columnconfigure(1, weight=1)
 
         controls = ttk.Frame(outer)
