@@ -103,19 +103,25 @@ class OnionbreadApp:
         if path:
             self.tor_path.set(path)
 
+    def _browse_transport(self) -> None:
+        path = filedialog.askopenfilename(title="Select pluggable transport helper")
+        if path:
+            self.transport_path.set(path)
+
     def _update_bridge_controls(self) -> None:
-        custom = self.transport.get() == "Custom bridge lines"
-        state = "normal" if custom else "disabled"
+        direct = self.transport.get() == TRANSPORTS[0]
+        state = "disabled" if direct else "normal"
         self.bridge_entry.configure(state=state)
-        if self.transport.get() == "No bridges (direct Tor)":
+        self.transport_entry.configure(state=state)
+        self.transport_browse.configure(state=state)
+        if direct:
             self.bridge_hint.configure(text="Connect without bridges. Your network must allow direct Tor connections.")
-        elif custom:
-            self.bridge_hint.configure(text="Paste complete bridge lines from an official or trusted source, one per line. Pluggable transports must be installed separately.")
+        elif self.transport.get() == "Snowflake":
+            self.bridge_hint.configure(text="Paste a current Snowflake Bridge line. The helper can be Tor Expert Bundle's lyrebird executable.")
+        elif self.transport.get() == "obfs4":
+            self.bridge_hint.configure(text="Paste complete obfs4 Bridge lines. The helper can be Tor Expert Bundle's lyrebird or an obfs4proxy executable.")
         else:
-            self.bridge_hint.configure(text=(
-                "This selects the bridge transport type; it does not download bridges or install a transport. "
-                "Your Tor package must support it and may need a matching ClientTransportPlugin entry."
-            ))
+            self.bridge_hint.configure(text="Paste complete WebTunnel Bridge lines. The helper can be Tor Expert Bundle's lyrebird executable.")
 
     def _append_log(self, text: str) -> None:
         self.log.configure(state="normal")
