@@ -19,7 +19,7 @@ from tkinter.scrolledtext import ScrolledText
 
 
 APP_NAME = "Onionbread"
-TRANSPORTS = ("No bridges (direct Tor)", "Custom bridge lines")
+TRANSPORTS = ("Direct Tor (no bridges)", "obfs4", "Snowflake", "WebTunnel")
 
 
 class OnionbreadApp:
