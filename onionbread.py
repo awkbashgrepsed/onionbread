@@ -19,9 +19,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
+from windows_vpn import WindowsVpn
+
 
 APP_NAME = "Onionbread"
 TRANSPORTS = ("Direct Tor (no bridges)", "obfs4", "Snowflake", "WebTunnel")
+CONNECTION_MODES = ("SOCKS5 proxy only", "System VPN (experimental)")
 
 
 class OnionbreadApp:
@@ -32,6 +35,8 @@ class OnionbreadApp:
         self.root.minsize(540, 520)
 
         self.process: subprocess.Popen[str] | None = None
+        self.vpn_manager: WindowsVpn | None = None
+        self._vpn_start_attempted = False
         self.reader_thread: threading.Thread | None = None
         self.messages: queue.Queue[tuple[str, str]] = queue.Queue()
         self.temp_dir: tempfile.TemporaryDirectory[str] | None = None
@@ -44,6 +49,10 @@ class OnionbreadApp:
         if saved_transport not in TRANSPORTS:
             saved_transport = TRANSPORTS[0]
         self.transport = tk.StringVar(value=saved_transport)
+        saved_mode = saved_settings.get("connection_mode", CONNECTION_MODES[0])
+        if saved_mode not in CONNECTION_MODES:
+            saved_mode = CONNECTION_MODES[0]
+        self.connection_mode = tk.StringVar(value=saved_mode)
         self.transport_path = tk.StringVar(value=saved_settings.get("transport_path", ""))
         self._saved_bridge_lines = saved_settings.get("bridge_lines", "")
         self.share_to_lan = tk.BooleanVar(value=saved_settings.get("share_to_lan", "false").lower() == "true")
@@ -76,6 +85,20 @@ class OnionbreadApp:
         binary.pack(fill="x", pady=(12, 8))
         ttk.Entry(binary, textvariable=self.tor_path).pack(side="left", fill="x", expand=True)
         ttk.Button(binary, text="Browse…", command=self._browse_tor).pack(side="left", padx=(6, 0))
+
+        mode_frame = ttk.LabelFrame(outer, text="Connection mode", padding=8)
+        mode_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(mode_frame, text="Route traffic through").pack(side="left")
+        self.mode_box = ttk.Combobox(
+            mode_frame, textvariable=self.connection_mode, values=CONNECTION_MODES,
+            state="readonly", width=29,
+        )
+        self.mode_box.pack(side="left", padx=(8, 0))
+        ttk.Label(
+            mode_frame,
+            text="VPN mode changes Windows routes; test branch only.",
+            wraplength=270,
+        ).pack(side="left", padx=(10, 0))
 
         bridge = ttk.LabelFrame(outer, text="Bridge configuration", padding=8)
         bridge.pack(fill="x", pady=(0, 8))
@@ -159,7 +182,7 @@ class OnionbreadApp:
         if not isinstance(data, dict):
             return {}
         settings: dict[str, str] = {}
-        for key in ("tor_path", "transport", "transport_path", "bridge_lines", "share_to_lan", "socks_port", "control_port_enabled", "control_port"):
+        for key in ("tor_path", "transport", "transport_path", "bridge_lines", "share_to_lan", "socks_port", "control_port_enabled", "control_port", "connection_mode"):
             value = data.get(key)
             if isinstance(value, str):
                 settings[key] = value
@@ -170,6 +193,7 @@ class OnionbreadApp:
         settings = {
             "tor_path": self.tor_path.get().strip(),
             "transport": self.transport.get(),
+            "connection_mode": self.connection_mode.get(),
             "transport_path": self.transport_path.get().strip(),
             "bridge_lines": self.bridge_entry.get("1.0", "end-1c"),
             "share_to_lan": str(self.share_to_lan.get()).lower(),
@@ -558,12 +582,18 @@ class OnionbreadApp:
                             self.status.set("Connected")
                         else:
                             self.bootstrap_text.set(f"Connecting — {percent}% · {stage}")
+                        if percent >= 100 and self.connection_mode.get() == CONNECTION_MODES[1] and not self._vpn_start_attempted:
+                            self._vpn_start_attempted = True
+                            self._start_vpn()
                     elif "Bootstrapped " not in value and (
                         "Failed to start process" in value or "failed at launch" in value.lower()
                     ):
                         self.bootstrap_text.set("Transport failed to start")
+                elif kind == "vpn-log":
+                    self._append_log(value)
                 elif kind == "exit":
                     self._append_log(f"Tor exited with code {value}.")
+                    self._stop_vpn()
                     self.process = None
                     self._set_connected(False)
                     self.bootstrap_text.set("Disconnected")
@@ -575,6 +605,7 @@ class OnionbreadApp:
             self.root.after(100, self._drain_messages)
 
     def disconnect(self) -> None:
+        self._stop_vpn()
         process = self.process
         if not process:
             return
@@ -592,7 +623,44 @@ class OnionbreadApp:
         self._set_connected(False)
         self.bootstrap_text.set("Disconnected")
         self.bootstrap_progress.set(0)
+        self._vpn_start_attempted = False
         self._cleanup_temp()
+
+    def _start_vpn(self) -> None:
+        if os.name != "nt":
+            messagebox.showerror("Windows VPN only", "System VPN mode is currently Windows-only.", parent=self.root)
+            return
+        if not self.process or self.process.poll() is not None:
+            return
+        try:
+            socks_port, _control_port = self._validate_ports()
+            self.vpn_manager = WindowsVpn(
+                Path(__file__).resolve().parent, socks_port, self.process.pid,
+                lambda message: self.messages.put(("vpn-log", message)),
+            )
+            self.vpn_manager.start()
+            self.status.set("VPN connected")
+            self.bootstrap_text.set("Connected — system VPN active")
+            self._append_log("Experimental system VPN is active. Verify public IP and DNS before relying on it.")
+        except Exception as exc:
+            self._append_log(f"VPN startup failed: {exc}")
+            if self.vpn_manager:
+                self.vpn_manager.stop()
+                self.vpn_manager = None
+            self.status.set("Proxy connected; VPN failed")
+            self.bootstrap_text.set("Tor proxy connected — VPN failed")
+            messagebox.showerror("VPN startup failed", str(exc), parent=self.root)
+
+    def _stop_vpn(self) -> None:
+        manager = self.vpn_manager
+        self.vpn_manager = None
+        if manager:
+            try:
+                manager.stop()
+                self._append_log("VPN stopped; tunnel routes and DNS forwarder restored.")
+            except Exception as exc:
+                self._append_log(f"VPN cleanup reported an error: {exc}")
+        self._vpn_start_attempted = False
 
     def _cleanup_temp(self) -> None:
         if self.temp_dir:
