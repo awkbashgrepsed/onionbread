@@ -40,6 +40,12 @@ This downloads the official Windows x86_64 Tor Expert Bundle and stages its file
 
 A Windows portable-build workflow is available at `.github/workflows/windows-portable.yml`. Run it manually from GitHub Actions or push a `v*` tag; it builds a portable ZIP as a workflow artifact. The workflow stages the official Tor bundle and the Windows VPN dependencies. Tor's detached signature is not verified by the workflow, so verify the upstream bundle before treating a build as a public release. The VPN runtime staging helper is `tools/fetch_vpn_runtime.py`; it downloads tun2socks v2.7.0 and Wintun into `runtime/vpn/`.
 
+## Experimental Windows system VPN
+
+The `experimental/windows-vpn-mode` branch adds a **System VPN (experimental)** connection mode. It starts Tor first, then runs the bundled `tun2socks`/Wintun tunnel, adds an IPv4 default route, watches Tor active IPv4 relay connections and adds physical-gateway route exceptions, and forwards Windows DNS queries through a local DNS-over-HTTPS relay carried by Tor SOCKS. While active, IPv6 is temporarily disabled on the physical adapter to prevent it bypassing the IPv4 tunnel; it is re-enabled on normal disconnect. The app must be launched **as Administrator**. If startup fails, the Tor SOCKS proxy remains available and the log explains the failure.
+
+This is an experiment, not a verified leak-proof VPN. Route changes can briefly interrupt connectivity; forced termination, a crash, or a power loss can prevent cleanup. Test only when you can restore network settings, and do not rely on it for sensitive traffic yet. First verify the public IP from a browser, test DNS resolution, disconnect and confirm ordinary connectivity and IPv6 return. If anything goes wrong, close Onionbread, reboot if necessary, and inspect the physical adapter DNS and IPv6 binding settings. The portable Windows workflow runs on pushes to this branch and uploads a ZIP artifact after the build succeeds.
+
 ## Using a bridge
 
 1. Select **obfs4**, **Snowflake**, or **WebTunnel**.
@@ -51,4 +57,4 @@ The app writes a matching `ClientTransportPlugin` and `UseBridges 1` entry into 
 
 ## Scope / limitations
 
-This is an early CLI wrapper, not a full Orbot equivalent. It does not configure a system-wide VPN, transparent proxying, or per-app routing, and bridge provisioning is still manual. The GUI displays bootstrap percentage/status as Tor reports it. Avoid running another Tor instance already bound to port 9050 at the same time.
+This is an early CLI wrapper, not a full Orbot equivalent. The system VPN is experimental and Windows-only on the `experimental/windows-vpn-mode` branch; bridge provisioning is still manual. The GUI displays bootstrap percentage/status as Tor reports it. Avoid running another Tor instance already bound to port 9050 at the same time.
