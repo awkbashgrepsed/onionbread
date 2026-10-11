@@ -38,7 +38,7 @@ python tools/fetch_tor_runtime.py
 
 This downloads the official Windows x86_64 Tor Expert Bundle and stages its files under `runtime/tor/`. Onionbread then detects `runtime/tor/tor.exe` and its `runtime/tor/pluggable_transports/lyrebird.exe` automatically. The script defaults to bundle version `15.0.24`; pass `--version VERSION` to select another published version. Verify the Tor Project signature before distributing the resulting package. Do not commit the staged runtime to the source repository; include it in a release artifact instead.
 
-A Windows portable-build workflow is available at `.github/workflows/windows-portable.yml`. Run it manually from GitHub Actions or push a `v*` tag; it builds a portable ZIP as a workflow artifact. The workflow packages the official bundle but does not itself verify its detached signature, so verify the upstream bundle before treating a build as a public release.
+A Windows portable-build workflow is available at `.github/workflows/windows-portable.yml`. Run it manually from GitHub Actions or push a `v*` tag; it builds a portable ZIP as a workflow artifact. The workflow stages the official Tor bundle and the Windows VPN dependencies. Tor's detached signature is not verified by the workflow, so verify the upstream bundle before treating a build as a public release. The VPN runtime staging helper is `tools/fetch_vpn_runtime.py`; it downloads tun2socks v2.7.0 and Wintun into `runtime/vpn/`.
 
 ## Using a bridge
 
