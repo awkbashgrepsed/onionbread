@@ -8,7 +8,6 @@ from __future__ import annotations
 import ctypes
 import json
 import os
-import queue
 import socket
 import ssl
 import subprocess
@@ -181,6 +180,9 @@ class WindowsVpn:
         self.tun_index: int | None = None
         self.route_added = False
         self.peer_routes: set[str] = set()
+        self.physical_adapter: str | None = None
+        self.original_dns: list[str] = []
+        self.ipv6_was_enabled = False
         self.stop_event = threading.Event()
         self.monitor: threading.Thread | None = None
 
@@ -210,6 +212,17 @@ class WindowsVpn:
         adapter = _powershell(
             f"Get-NetAdapter -InterfaceIndex {self.physical_index} | Select-Object -ExpandProperty Name"
         ).strip()
+        self.physical_adapter = adapter
+        dns_state = json.loads(_powershell(
+            f"Get-DnsClientServerAddress -InterfaceIndex {self.physical_index} -AddressFamily IPv4 | "
+            "Select-Object -ExpandProperty ServerAddresses | ConvertTo-Json -Compress"
+        , check=False) or "[]")
+        self.original_dns = dns_state if isinstance(dns_state, list) else ([dns_state] if dns_state else [])
+        ipv6_state = _powershell(
+            f'Get-NetAdapterBinding -Name "{adapter}" -ComponentID ms_tcpip6 | '
+            "Select-Object -ExpandProperty Enabled", check=False
+        ).strip().lower()
+        self.ipv6_was_enabled = ipv6_state == "true"
         self.log(f"VPN: using physical adapter {adapter}, gateway {self.gateway}")
         command = [
             str(tun), "--device", "wintun",
@@ -221,6 +234,7 @@ class WindowsVpn:
             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
             errors="replace", bufsize=1,
         )
+        threading.Thread(target=self._read_tun_output, daemon=True, name="Onionbread-tun2socks-log").start()
         try:
             self._wait_for_tun()
             self._run(
@@ -232,9 +246,18 @@ class WindowsVpn:
             )
             self.dns = DnsOverTor(self.socks_port)
             self.dns.start()
+            # Route Windows resolver requests through the local DoH forwarder.
+            self._run(
+                f"Set-DnsClientServerAddress -InterfaceIndex {self.physical_index} -ServerAddresses 127.0.0.1"
+            )
             self._run(
                 f"Set-DnsClientServerAddress -InterfaceIndex {self.tun_index} -ServerAddresses 127.0.0.1"
             )
+            if self.ipv6_was_enabled and self.physical_adapter:
+                self._run(
+                    f' Disable-NetAdapterBinding -Name "{self.physical_adapter}" -ComponentID ms_tcpip6 -Confirm:$false'
+                )
+                self.log("VPN: IPv6 disabled on the physical adapter to avoid an IPv6 bypass.")
             self._run(
                 f"New-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex {self.tun_index} "
                 f"-NextHop {TUN_ADDRESS} -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction Stop | Out-Null"
@@ -246,6 +269,12 @@ class WindowsVpn:
         except Exception:
             self.stop()
             raise
+
+    def _read_tun_output(self) -> None:
+        process = self.process
+        if process and process.stdout:
+            for line in process.stdout:
+                self.log("tun2socks: " + line.rstrip())
 
     def _wait_for_tun(self) -> None:
         deadline = time.monotonic() + 12
@@ -314,6 +343,23 @@ class WindowsVpn:
                     "Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue",
                     check=False,
                 )
+        if self.physical_index is not None:
+            if self.original_dns:
+                servers = ",".join(self.original_dns)
+                _powershell(
+                    f"Set-DnsClientServerAddress -InterfaceIndex {self.physical_index} -ServerAddresses {servers}",
+                    check=False,
+                )
+            else:
+                _powershell(
+                    f"Set-DnsClientServerAddress -InterfaceIndex {self.physical_index} -ResetServerAddresses",
+                    check=False,
+                )
+        if self.ipv6_was_enabled and self.physical_adapter:
+            _powershell(
+                f'Enable-NetAdapterBinding -Name "{self.physical_adapter}" -ComponentID ms_tcpip6 -Confirm:$false',
+                check=False,
+            )
         self.peer_routes.clear()
         process = self.process
         self.process = None
