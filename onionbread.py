@@ -102,12 +102,12 @@ class OnionbreadApp:
         # in smaller windows.
         progress = ttk.Frame(outer)
         progress.pack(fill="x", pady=(0, 6))
-        ttk.Label(progress, textvariable=self.bootstrap_text).pack(side="left")
+        ttk.Label(progress, textvariable=self.bootstrap_text).pack(anchor="w")
         self.progress_bar = ttk.Progressbar(
             progress, orient="horizontal", mode="determinate", maximum=100,
-            variable=self.bootstrap_progress, length=180
+            variable=self.bootstrap_progress
         )
-        self.progress_bar.pack(side="right", fill="x", expand=True, padx=(12, 0))
+        self.progress_bar.pack(fill="x", expand=True, pady=(4, 0))
 
         footer = ttk.Frame(outer)
         footer.pack(fill="x", pady=(8, 0))
