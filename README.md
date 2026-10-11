@@ -6,7 +6,7 @@ A Python + Tkinter front end for managing a local Tor CLI process and configurin
 
 - Connect / disconnect controls, live Tor stdout log, and a bootstrap progress bar
 - Automatic Tor runtime discovery (bundled runtime first, then common Scoop/PATH locations) plus a Tor executable path picker
-- Automatic detection of the SOCKS proxy port shown in the bottom status strip (currently fixed at 127.0.0.1:9050)
+- Bottom status strip showing the SOCKS5 proxy endpoint (currently fixed at 127.0.0.1:9050) and ControlPort state
 - Direct Tor, obfs4, Snowflake, and WebTunnel modes
 - Pluggable-transport helper path picker, with discovery of common helper names on PATH and beside the Tor executable
 - Bridge-line validation against the selected transport
@@ -37,6 +37,8 @@ python tools/fetch_tor_runtime.py
 ```
 
 This downloads the official Windows x86_64 Tor Expert Bundle and stages its files under `runtime/tor/`. Onionbread then detects `runtime/tor/tor.exe` and its `runtime/tor/pluggable_transports/lyrebird.exe` automatically. The script defaults to bundle version `15.0.24`; pass `--version VERSION` to select another published version. Verify the Tor Project signature before distributing the resulting package. Do not commit the staged runtime to the source repository; include it in a release artifact instead.
+
+A Windows portable-build workflow is available at `.github/workflows/windows-portable.yml`. Run it manually from GitHub Actions or push a `v*` tag; it builds a portable ZIP as a workflow artifact. The workflow packages the official bundle but does not itself verify its detached signature, so verify the upstream bundle before treating a build as a public release.
 
 ## Using a bridge
 
