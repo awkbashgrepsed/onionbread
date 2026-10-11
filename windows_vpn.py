@@ -260,7 +260,7 @@ class WindowsVpn:
                 self.log("VPN: IPv6 disabled on the physical adapter to avoid an IPv6 bypass.")
             self._run(
                 f"New-NetRoute -DestinationPrefix '0.0.0.0/0' -InterfaceIndex {self.tun_index} "
-                f"-NextHop {TUN_ADDRESS} -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction Stop | Out-Null"
+                "-NextHop 0.0.0.0 -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction Stop | Out-Null"
             )
             self.route_added = True
             self.log("VPN route installed. DNS queries are forwarded as DNS-over-HTTPS through Tor.")
