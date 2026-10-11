@@ -309,8 +309,10 @@ class WindowsVpn:
                     f"$pids = @({self.tor_pid}) + @(Get-Process -Name lyrebird -ErrorAction SilentlyContinue | "
                     "Select-Object -ExpandProperty Id); "
                     "Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | "
-                    "Where-Object {$pids -contains $_.OwningProcess -and "
-                    "$_.RemoteAddress -match '^\\d+\\.\\d+\\.\\d+\\.\\d+                if isinstance(peers, str):
+                    "Where-Object {{$pids -contains $_.OwningProcess -and $_.RemoteAddress -match '^\\d+\\.\\d+\\.\\d+\\.\\d+$'}} | "
+                    "Select-Object -ExpandProperty RemoteAddress -Unique | ConvertTo-Json -Compress"
+                ))
+                if isinstance(peers, str):
                     peers = [peers]
                 for ip in peers:
                     if not isinstance(ip, str) or ip in self.peer_routes or ip.startswith(("127.", "10.", "192.168.", "172.16.")):
