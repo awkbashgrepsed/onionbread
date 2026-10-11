@@ -204,6 +204,10 @@ class OnionbreadApp:
         return socks_port, control_port
 
     def _open_settings(self) -> None:
+        original = (
+            self.share_to_lan.get(), self.socks_port.get(),
+            self.control_port_enabled.get(), self.control_port.get(),
+        )
         window = tk.Toplevel(self.root)
         window.title("Onionbread Settings")
         window.transient(self.root)
@@ -239,6 +243,13 @@ class OnionbreadApp:
         )
         actions = ttk.Frame(body)
         actions.grid(row=9, column=0, columnspan=2, sticky="e")
+        def cancel() -> None:
+            (share, socks, control_enabled, control) = original
+            self.share_to_lan.set(share)
+            self.socks_port.set(socks)
+            self.control_port_enabled.set(control_enabled)
+            self.control_port.set(control)
+            window.destroy()
         def save() -> None:
             try:
                 self._validate_ports()
@@ -248,9 +259,10 @@ class OnionbreadApp:
             self._save_settings()
             self._update_port_summary()
             window.destroy()
-        ttk.Button(actions, text="Cancel", command=window.destroy).pack(side="right")
+        ttk.Button(actions, text="Cancel", command=cancel).pack(side="right")
         ttk.Button(actions, text="Save", command=save).pack(side="right", padx=(0, 8))
-        window.bind("<Escape>", lambda _event: window.destroy())
+        window.protocol("WM_DELETE_WINDOW", cancel)
+        window.bind("<Escape>", lambda _event: cancel())
         window.grab_set()
         window.focus_set()
 
